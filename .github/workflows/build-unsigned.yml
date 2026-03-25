@@ -1,0 +1,139 @@
+name: Build Unsigned APK
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    # 也支持手动触发
+    workflow_dispatch:
+
+jobs:
+  Build:
+    name: Build Unsigned APK
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out git repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+
+      - name: Setup Java Env
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'microsoft'
+          java-version: '17'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x android/gradlew
+
+      - name: Clean Gradle cache
+        run: |
+          cd android
+          ./gradlew clean --no-daemon || true
+          rm -rf app/build || true
+
+      - name: Get package version
+        run: |
+          PACKAGE_VERSION=$(node -p "require('./package.json').version")
+          echo "PACKAGE_VERSION=$PACKAGE_VERSION" >> $GITHUB_ENV
+          echo "Package version: $PACKAGE_VERSION"
+
+      - name: List OpenApi files (debug)
+        run: |
+          echo "=== Checking OpenApi files ==="
+          ls -la src/screens/Home/Views/Setting/settings/OpenApi/ || echo "OpenApi settings dir not found"
+          ls -la src/core/openApi/ || echo "openApi core dir not found"
+          ls -la android/app/src/main/java/cn/toside/music/mobile/openapi/ || echo "openapi java dir not found"
+          echo "=== Main.tsx content ==="
+          grep -A5 "SETTING_SCREENS" src/screens/Home/Views/Setting/Main.tsx || true
+
+      - name: Build Unsigned Release APK
+        env:
+          DISABLE_SVG: 1
+        run: |
+          cd android
+          ./gradlew assembleRelease --no-daemon --no-build-cache
+
+      - name: List built APKs
+        run: |
+          echo "Built APK files:"
+          ls -la android/app/build/outputs/apk/release/ || ls -la android/app/build/outputs/apk/debug/ || true
+
+      - name: Rename APKs with version
+        run: |
+          cd android/app/build/outputs/apk/release
+          for apk in *.apk; do
+            if [[ "$apk" != *"v${{ env.PACKAGE_VERSION }}"* ]]; then
+              new_name="${apk/-v[0-9]*/-v${{ env.PACKAGE_VERSION }}}"
+              new_name="${new_name/-universal/-v${{ env.PACKAGE_VERSION }}-universal}"
+              if [[ "$apk" == *"universal"* ]]; then
+                new_name="lx-music-mobile-v${{ env.PACKAGE_VERSION }}-universal.apk"
+              elif [[ "$apk" == *"arm64-v8a"* ]]; then
+                new_name="lx-music-mobile-v${{ env.PACKAGE_VERSION }}-arm64-v8a.apk"
+              elif [[ "$apk" == *"armeabi-v7a"* ]]; then
+                new_name="lx-music-mobile-v${{ env.PACKAGE_VERSION }}-armeabi-v7a.apk"
+              elif [[ "$apk" == *"x86_64"* ]]; then
+                new_name="lx-music-mobile-v${{ env.PACKAGE_VERSION }}-x86_64.apk"
+              elif [[ "$apk" == *"x86.apk"* ]]; then
+                new_name="lx-music-mobile-v${{ env.PACKAGE_VERSION }}-x86.apk"
+              else
+                new_name="$apk"
+              fi
+              if [ "$apk" != "$new_name" ]; then
+                mv "$apk" "$new_name"
+              fi
+            fi
+          done
+          ls -la *.apk
+
+      - name: Generate file MD5
+        run: |
+          echo "### APK MD5 Checksums" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          cd android/app/build/outputs/apk/release
+          md5sum *.apk >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload Artifact arm64-v8a
+        uses: actions/upload-artifact@v4
+        with:
+          name: lx-music-mobile-v${{ env.PACKAGE_VERSION }}-arm64-v8a-unsigned
+          path: android/app/build/outputs/apk/release/lx-music-mobile-v${{ env.PACKAGE_VERSION }}-arm64-v8a.apk
+          if-no-files-found: warn
+
+      - name: Upload Artifact armeabi-v7a
+        uses: actions/upload-artifact@v4
+        with:
+          name: lx-music-mobile-v${{ env.PACKAGE_VERSION }}-armeabi-v7a-unsigned
+          path: android/app/build/outputs/apk/release/lx-music-mobile-v${{ env.PACKAGE_VERSION }}-armeabi-v7a.apk
+          if-no-files-found: warn
+
+      - name: Upload Artifact x86_64
+        uses: actions/upload-artifact@v4
+        with:
+          name: lx-music-mobile-v${{ env.PACKAGE_VERSION }}-x86_64-unsigned
+          path: android/app/build/outputs/apk/release/lx-music-mobile-v${{ env.PACKAGE_VERSION }}-x86_64.apk
+          if-no-files-found: warn
+
+      - name: Upload Artifact x86
+        uses: actions/upload-artifact@v4
+        with:
+          name: lx-music-mobile-v${{ env.PACKAGE_VERSION }}-x86-unsigned
+          path: android/app/build/outputs/apk/release/lx-music-mobile-v${{ env.PACKAGE_VERSION }}-x86.apk
+          if-no-files-found: warn
+
+      - name: Upload Artifact universal
+        uses: actions/upload-artifact@v4
+        with:
+          name: lx-music-mobile-v${{ env.PACKAGE_VERSION }}-universal-unsigned
+          path: android/app/build/outputs/apk/release/lx-music-mobile-v${{ env.PACKAGE_VERSION }}-universal.apk
+          if-no-files-found: warn
